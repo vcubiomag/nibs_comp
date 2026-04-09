@@ -1,0 +1,11 @@
+NIBS Methodologies:
+- simNIBS
+- Sim4Life
+- Ansys
+- Deep learning framework(s) (should pick 2-3 papers and analyze them too)
+
+Morpological Sites:
+- M1 (C3/C4): Lateral, physical ground truth (MEPs).
+- DLPFC (F3/F4): Anterior-lateral, primary clinical target (Depression).
+- SMA (FCz): Midline, deep complex meshing (OCD).
+- PPC (P3/P4): Posterior-lateral, complex folding, network targeting (Memory).
