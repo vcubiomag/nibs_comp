@@ -49,7 +49,9 @@ def extract_surfaces(mesh: pyvista.UnstructuredGrid) -> dict[str, pyvista.PolyDa
     return surfaces
 
 
-def extract_volumes(mesh: pyvista.UnstructuredGrid) -> dict[str, pyvista.UnstructuredGrid]:
+def extract_volumes(
+    mesh: pyvista.UnstructuredGrid,
+) -> dict[str, pyvista.UnstructuredGrid]:
     phys = mesh.cell_data["gmsh:physical"]
     tet_mask = mesh.celltypes == VTK_TETRA
 
@@ -91,14 +93,18 @@ def main():
             if not surface.is_manifold:
                 repaired_surface = repair_surface(surface)
 
-            print(f"[surface] {label}: orig_manifold={surface.is_manifold}, repaired_manifold={repaired_surface.is_manifold}")
+            print(
+                f"[surface] {label}: orig_manifold={surface.is_manifold}, repaired_manifold={repaired_surface.is_manifold}"
+            )
             surface.save(output_path / f"{label}_orig.stl")
             repaired_surface.save(output_path / f"{label}_repaired.stl")
 
         volumes = extract_volumes(mesh)
         for label, volume in volumes.items():
             solid_surface = volume_to_solid_surface(volume)
-            print(f"[solid]   {label}: n_tets={volume.n_cells}, boundary_faces={solid_surface.n_cells}, manifold={solid_surface.is_manifold}")
+            print(
+                f"[solid]   {label}: n_tets={volume.n_cells}, boundary_faces={solid_surface.n_cells}, manifold={solid_surface.is_manifold}"
+            )
             solid_surface.save(output_path / f"{label}_solid.stl")
 
 

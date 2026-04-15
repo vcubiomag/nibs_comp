@@ -9,3 +9,10 @@ Morpological Sites:
 - DLPFC (F3/F4): Anterior-lateral, primary clinical target (Depression).
 - SMA (FCz): Midline, deep complex meshing (OCD).
 - PPC (P3/P4): Posterior-lateral, complex folding, network targeting (Memory).
+
+
+# for M1, use C3
+# for DLPFC, use F3
+# for SMA, use FCz
+# for PPC, use P3 and P4
+

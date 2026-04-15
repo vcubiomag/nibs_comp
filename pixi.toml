@@ -1,6 +1,6 @@
 [workspace]
 authors = ["Sriman Achanta <68172138+srimanachanta@users.noreply.github.com>"]
-channels = ["conda-forge"]
+channels = ["https://prefix.dev/vcubiomag", "conda-forge"]
 name = "nibs_comp"
 platforms = ["osx-arm64"]
 version = "0.1.0"
@@ -9,7 +9,20 @@ version = "0.1.0"
 
 [dependencies]
 python = ">=3.14.4,<3.15"
-pyvista = ">=0.47.1,<0.48"
 rich = ">=14.3.3,<15"
+
+[feature.processing.dependencies]
+pyvista = ">=0.47.3,<0.48"
 meshio = ">=5.3.5,<6"
 pymeshfix = ">=0.18.0,<0.19"
+numpy = ">=2.4.3,<3"
+
+[feature.efields.dependencies]
+cyclopts = ">=4.10.1,<5"
+
+[feature.simnibs.dependencies]
+simnibs = ">=4.6.0,<5"
+
+[environments]
+processing = ["processing"]
+simnibs = ["efields", "simnibs"]
