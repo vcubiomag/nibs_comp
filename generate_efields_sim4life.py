@@ -1,7 +1,10 @@
 import os
+import logging
 import numpy as np
 from pathlib import Path
 from typing import Any, TypedDict, cast
+
+from scipy.spatial import cKDTree
 
 from s4l_v1 import model
 from s4l_v1.simulation import emlf
@@ -68,6 +71,13 @@ COIL_STANDOFF_MM = 4.0
 WING_GAP_MM = 4.0  # midline gap between outer-turn centerlines (Magstim D70, per SimNIBS Magstim_70mm_Fig8.ccd reference: wing centers at +/-45 mm, outer turn radius ~43 mm)
 AMPLITUDE_PER_TURN_A = 1.0
 
+# Radius over which scalp point-normals are averaged to get a stable coil axis.
+# Raw per-vertex normals on voxelisation-derived meshes are noisy; patch-averaging
+# damps that (Gomez 2021 / SimNIBS-TAP use 12 mm).
+LOCAL_NORMAL_RADIUS_MM = 12.0
+
+logger = logging.getLogger(__name__)
+
 MATERIAL_DATABASE_NAME = "IT'IS LF 5.0"
 TISSUE_MATERIALS: dict[str, str] = {
     "white_matter": "Brain (White Matter)",
@@ -117,27 +127,75 @@ def read_charm_eeg_positions(m2m_path: Path) -> dict[str, np.ndarray]:
     return positions
 
 
-def create_figure8_coil(
-    center_mm: Any,
-    scalp_normal: Any,
-    ydir_pos_mm: Any,
+def _patch_averaged_outward_normal(
+    seed: np.ndarray,
+    scalp_normals: np.ndarray,
+    scalp_kdtree: cKDTree,
+    head_centroid: np.ndarray,
+    radius: float = LOCAL_NORMAL_RADIUS_MM,
+) -> np.ndarray:
+    """Stable outward coil axis: mean scalp point-normal over a local patch.
+
+    Averaging the per-vertex normals within `radius` of the seed damps the
+    high-frequency noise of voxelisation-derived meshes that makes a single-vertex
+    normal tilt the whole flat coil. The result is oriented outward (away from the
+    head centroid); falls back to the nearest-vertex normal if the patch is empty.
+    """
+    nb = scalp_kdtree.query_ball_point(seed, r=radius)
+    if nb:
+        n = scalp_normals[np.asarray(nb, dtype=int)].mean(axis=0)
+    else:
+        _, nearest = scalp_kdtree.query(seed)
+        n = scalp_normals[int(nearest)]
+
+    mag = np.linalg.norm(n)
+    if mag < 1e-12:
+        _, nearest = scalp_kdtree.query(seed)
+        n = scalp_normals[int(nearest)]
+        mag = np.linalg.norm(n)
+    n = n / mag
+
+    if np.dot(n, seed - head_centroid) < 0:
+        n = -n
+    return n
+
+
+def _compute_coil_frame(
+    center_mm: np.ndarray,
+    ydir_pos_mm: np.ndarray,
+    scalp_points: np.ndarray,
+    scalp_normals: np.ndarray,
+    scalp_kdtree: cKDTree,
+    head_centroid: np.ndarray,
     mean_radius_mm: float = MEAN_WING_RADIUS_MM,
     n_turns: int = N_TURNS_PER_WING,
     wire_width_mm: float = WIRE_WIDTH_MM,
     standoff_mm: float = COIL_STANDOFF_MM,
     wing_gap_mm: float = WING_GAP_MM,
-    n_points: int = 64,
-) -> tuple[list[Any], list[Any]]:
-    z_hat = scalp_normal / np.linalg.norm(scalp_normal)
-    y_raw = ydir_pos_mm - center_mm
+) -> tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray, np.ndarray, float]:
+    """Resolve the coil placement frame and origin from scalp geometry.
+
+    Models a real operator resting a rigid flat figure-8 on the scalp:
+      * coil axis z_hat = patch-averaged outward scalp normal (stable orientation),
+      * seed = closest scalp surface point to the target electrode (lateral center),
+      * the coil plane is lifted so it sits `standoff_mm` above the most-protruding
+        scalp point beneath its copper footprint — a supporting plane perpendicular
+        to z_hat. Since every footprint scalp height is then strictly below the plane,
+        the flat coil cannot penetrate the curved scalp.
+
+    Returns (coil_origin, x_hat, y_hat, z_hat, radii, wing_offset_mm).
+    """
+    _, seed_idx = scalp_kdtree.query(center_mm)
+    seed = scalp_points[int(seed_idx)]
+
+    z_hat = _patch_averaged_outward_normal(
+        seed, scalp_normals, scalp_kdtree, head_centroid
+    )
+    y_raw = ydir_pos_mm - seed
     y_proj = y_raw - np.dot(y_raw, z_hat) * z_hat
     y_hat = y_proj / np.linalg.norm(y_proj)
     x_hat = np.cross(y_hat, z_hat)
     x_hat = x_hat / np.linalg.norm(x_hat)
-
-    # Lift whole coil off the scalp along the outward normal before laying
-    # out the two wings, so every turn sits at the same stand-off height.
-    coil_origin = center_mm + standoff_mm * z_hat
 
     radii = mean_radius_mm + (np.arange(n_turns) - (n_turns - 1) / 2.0) * wire_width_mm
     # Push wing centers apart by the outer-turn radius plus half the midline
@@ -146,6 +204,56 @@ def create_figure8_coil(
     # The ~4 mm default matches the SimNIBS Magstim_70mm_Fig8.ccd reference
     # model (wing centers at +/-45 mm, outer turn radius ~43 mm).
     wing_offset_mm = float(radii.max()) + wing_gap_mm / 2.0
+    r_outer = float(radii.max())
+
+    # Supporting-plane standoff: among scalp vertices under the actual two-wing
+    # copper footprint, find the most protruding one along z_hat and rest the coil
+    # standoff_mm above it. Using the real outline (not a bounding circle) keeps the
+    # ear/jaw near lateral sites from spuriously lifting the coil.
+    footprint_r = wing_offset_mm + r_outer
+    nb = scalp_kdtree.query_ball_point(seed, r=footprint_r)
+    contact_height = 0.0
+    if nb:
+        pts = scalp_points[np.asarray(nb, dtype=int)] - seed
+        u = pts @ x_hat
+        v = pts @ y_hat
+        under_coil = (np.hypot(u - wing_offset_mm, v) <= r_outer) | (
+            np.hypot(u + wing_offset_mm, v) <= r_outer
+        )
+        if under_coil.any():
+            contact_height = float((pts @ z_hat)[under_coil].max())
+
+    coil_origin = seed + (contact_height + standoff_mm) * z_hat
+    return coil_origin, x_hat, y_hat, z_hat, radii, wing_offset_mm
+
+
+def create_figure8_coil(
+    center_mm: Any,
+    ydir_pos_mm: Any,
+    scalp_points: np.ndarray,
+    scalp_normals: np.ndarray,
+    scalp_kdtree: cKDTree,
+    head_centroid: np.ndarray,
+    mean_radius_mm: float = MEAN_WING_RADIUS_MM,
+    n_turns: int = N_TURNS_PER_WING,
+    wire_width_mm: float = WIRE_WIDTH_MM,
+    standoff_mm: float = COIL_STANDOFF_MM,
+    wing_gap_mm: float = WING_GAP_MM,
+    n_points: int = 64,
+) -> tuple[list[Any], list[Any]]:
+    coil_origin, x_hat, y_hat, z_hat, radii, wing_offset_mm = _compute_coil_frame(
+        np.asarray(center_mm, dtype=float),
+        np.asarray(ydir_pos_mm, dtype=float),
+        scalp_points,
+        scalp_normals,
+        scalp_kdtree,
+        head_centroid,
+        mean_radius_mm=mean_radius_mm,
+        n_turns=n_turns,
+        wire_width_mm=wire_width_mm,
+        standoff_mm=standoff_mm,
+        wing_gap_mm=wing_gap_mm,
+    )
 
     loop1_center = coil_origin + wing_offset_mm * x_hat
     loop2_center = coil_origin - wing_offset_mm * x_hat
@@ -163,6 +271,21 @@ def create_figure8_coil(
             )
             for t in ts
         ]
+
+    # Verify the placed coil clears the scalp. The supporting-plane standoff
+    # guarantees this geometrically, but a degenerate normal or sparse mesh could
+    # still slip through, so flag it instead of leaving it to a manual visual check.
+    ts = np.linspace(0, 2 * np.pi, n_points + 1)
+    ring = np.outer(np.cos(ts), x_hat) + np.outer(np.sin(ts), y_hat)
+    turn_pts = np.concatenate(
+        [lc + float(r) * ring for lc in (loop1_center, loop2_center) for r in radii]
+    )
+    min_clearance = float(scalp_kdtree.query(turn_pts)[0].min())
+    if min_clearance < standoff_mm / 2.0:
+        logger.warning(
+            f"Coil-scalp clearance {min_clearance:.1f} mm below half the "
+            f"{standoff_mm:.1f} mm standoff — check placement for intersection."
+        )
 
     wing1_turns = [model.CreatePolyLine(_circle(loop1_center, float(r))) for r in radii]
     wing2_turns = [model.CreatePolyLine(_circle(loop2_center, float(r))) for r in radii]
@@ -296,6 +419,10 @@ def main():
         scalp_mesh_n = pv.read(str(headmodel_comps["scalp"])).compute_normals(
             consistent_normals=True, flip_normals=False
         )
+        scalp_points = np.asarray(scalp_mesh_n.points, dtype=float)
+        scalp_normals = np.asarray(scalp_mesh_n.point_normals, dtype=float)
+        scalp_kdtree = cKDTree(scalp_points)
+        head_centroid = scalp_points.mean(axis=0)
 
         import_headmodel(subject_id, headmodel_comps)
 
@@ -309,11 +436,13 @@ def main():
                 center_mm: Any = eeg_positions[electrode]
                 ydir_mm: Any = eeg_positions[ydir_label]
 
-                closest_idx = scalp_mesh_n.find_closest_point(center_mm)
-                scalp_normal: Any = scalp_mesh_n.point_normals[closest_idx]
-
                 wing1_turns, wing2_turns = create_figure8_coil(
-                    center_mm, scalp_normal, ydir_mm
+                    center_mm,
+                    ydir_mm,
+                    scalp_points,
+                    scalp_normals,
+                    scalp_kdtree,
+                    head_centroid,
                 )
 
                 sim_label = f"{subject_id}_{site_name}"
