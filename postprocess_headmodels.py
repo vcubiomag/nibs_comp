@@ -1,5 +1,4 @@
 from pathlib import Path
-import numpy as np
 import pymeshfix
 import pyvista
 from rich.progress import track

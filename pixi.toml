@@ -2,7 +2,7 @@
 authors = ["Sriman Achanta <68172138+srimanachanta@users.noreply.github.com>"]
 channels = ["https://prefix.dev/vcubiomag", "conda-forge"]
 name = "nibs_comp"
-platforms = ["osx-arm64"]
+platforms = ["osx-arm64", "linux-64"]
 version = "0.1.0"
 
 [tasks]

@@ -15,4 +15,3 @@ Morpological Sites:
 # for DLPFC, use F3
 # for SMA, use FCz
 # for PPC, use P3 and P4
-

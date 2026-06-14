@@ -1,4 +1,3 @@
-from ImageML import HeadModelGeneration
 import os
 import numpy as np
 from pathlib import Path
@@ -16,6 +15,7 @@ HEADMODEL_PATH = Path("data/derivatives/headmodel_components")
 CHARM_PATH = Path("data/derivatives/simnibs_charm")
 SIM4LIFE_OUT = Path("data/derivatives/sim4life_magneto_quasistatic")
 
+
 class HeadmodelComponents(TypedDict):
     white_matter: Path
     gray_matter: Path
@@ -27,42 +27,33 @@ class HeadmodelComponents(TypedDict):
     blood: Path
     muscle: Path
 
+
 TMS_SITES = {
     "M1": [
         {
-            "simnibs_centre": "C3",
-            "simnibs_ydir": "CP5",
-            "s4l_electrode": "C3",
+            "s4l_centre": "C3",
             "s4l_ydir": "CP5",
         }
     ],
     "DLPFC": [
         {
-            "simnibs_centre": "F3",
-            "simnibs_ydir": "FC5",
-            "s4l_electrode": "F3",
+            "s4l_centre": "F3",
             "s4l_ydir": "FC5",
         }
     ],
     "SMA": [
         {
-            "simnibs_centre": "FCz",
-            "simnibs_ydir": "FC6",
-            "s4l_electrode": "FCz",
+            "s4l_centre": "FCz",
             "s4l_ydir": "FC6",
         }
     ],
     "PPC": [
         {
-            "simnibs_centre": "P3",
-            "simnibs_ydir": "PO3",
-            "s4l_electrode": "P3",
+            "s4l_centre": "P3",
             "s4l_ydir": "PO3",
         },
         {
-            "simnibs_centre": "P4",
-            "simnibs_ydir": "PO4",
-            "s4l_electrode": "P4",
+            "s4l_centre": "P4",
             "s4l_ydir": "PO4",
         },
     ],
@@ -79,16 +70,17 @@ AMPLITUDE_PER_TURN_A = 1.0
 
 MATERIAL_DATABASE_NAME = "IT'IS LF 5.0"
 TISSUE_MATERIALS: dict[str, str] = {
-    "white_matter":    "Brain (White Matter)",
-    "gray_matter":     "Brain (Grey Matter)",
-    "csf":             "Cerebrospinal Fluid",
-    "scalp":           "Scalp",
-    "eye_balls":       "Eye (Vitreous Humor)",
-    "cortical_bone":   "Skull (Cortical)",
+    "white_matter": "Brain (White Matter)",
+    "gray_matter": "Brain (Grey Matter)",
+    "csf": "Cerebrospinal Fluid",
+    "scalp": "Scalp",
+    "eye_balls": "Eye (Vitreous Humor)",
+    "cortical_bone": "Skull (Cortical)",
     "cancellous_bone": "Skull (Cancellous)",
-    "blood":           "Blood",
-    "muscle":          "Muscle",
+    "blood": "Blood",
+    "muscle": "Muscle",
 }
+
 
 def get_headmodel_component_paths(headmodel_comps_path: Path) -> HeadmodelComponents:
     paths_dict = {
@@ -96,6 +88,7 @@ def get_headmodel_component_paths(headmodel_comps_path: Path) -> HeadmodelCompon
         for key in HeadmodelComponents.__annotations__.keys()
     }
     return cast(HeadmodelComponents, paths_dict)
+
 
 def read_charm_eeg_positions(m2m_path: Path) -> dict[str, np.ndarray]:
     eeg_dir = m2m_path / "eeg_positions"
@@ -111,9 +104,9 @@ def read_charm_eeg_positions(m2m_path: Path) -> dict[str, np.ndarray]:
             line = line.strip()
             if not line or line.startswith("#"):
                 continue
-                
+
             parts = [p.strip() for p in line.split(",")]
-            
+
             if len(parts) >= 5:
                 try:
                     # 3. Use slicing for cleaner float conversion
@@ -122,6 +115,7 @@ def read_charm_eeg_positions(m2m_path: Path) -> dict[str, np.ndarray]:
                     pass
 
     return positions
+
 
 def create_figure8_coil(
     center_mm: Any,
@@ -174,7 +168,10 @@ def create_figure8_coil(
     wing2_turns = [model.CreatePolyLine(_circle(loop2_center, float(r))) for r in radii]
     return wing1_turns, wing2_turns
 
-def import_headmodel(subject_id: str, headmodel_components: HeadmodelComponents) -> None:
+
+def import_headmodel(
+    subject_id: str, headmodel_components: HeadmodelComponents
+) -> None:
     model.SetLengthUnits(units.MilliMeter)
     subject_model_group = model.CreateGroup(subject_id)
 
@@ -196,6 +193,7 @@ def import_headmodel(subject_id: str, headmodel_components: HeadmodelComponents)
             subject_model_group.Add(extra)
         tri_mesh.Delete()
         print(f"Finished importing: {tissue_name}")
+
 
 def setup_simulation(sim_label: str, wing1_turns, wing2_turns) -> None:
     print(f"Setting up Simulation: {sim_label}")
@@ -223,7 +221,7 @@ def setup_simulation(sim_label: str, wing1_turns, wing2_turns) -> None:
 
     for i, turn in enumerate(wing1_turns):
         cs = simulation.AddCurrentSourceSettings([turn])
-        cs.Name = f"Wing1_Turn{i+1:02d}"
+        cs.Name = f"Wing1_Turn{i + 1:02d}"
         cs.Amplitude = AMPLITUDE_PER_TURN_A, units.Ampere
         cs.Radius = EQUIV_WIRE_RADIUS_MM, units.MilliMeter
         cs.IsDirectionReverted = False
@@ -232,43 +230,46 @@ def setup_simulation(sim_label: str, wing1_turns, wing2_turns) -> None:
 
     for i, turn in enumerate(wing2_turns):
         cs = simulation.AddCurrentSourceSettings([turn])
-        cs.Name = f"Wing2_Turn{i+1:02d}"
+        cs.Name = f"Wing2_Turn{i + 1:02d}"
         cs.Amplitude = AMPLITUDE_PER_TURN_A, units.Ampere
         cs.Radius = EQUIV_WIRE_RADIUS_MM, units.MilliMeter
         cs.IsDirectionReverted = True
 
         simulation_entities.append(turn)
-    
+
     sensor_settings = simulation.AddOverallFieldSensorSettings()
     sensor_settings.RecordEField = True
     sensor_settings.RecordHField = False
     sensor_settings.RecordVectorPotentialField = False
 
     manual_grid_settings = simulation.AddManualGridSettings(simulation_entities)
+    # TODO: tune with new GPU
     # manual_grid_settings.MaxStep = np.array([0.5, 0.5, 0.5]), units.MilliMeters
     # manual_grid_settings.Resolution = np.array([0.5, 0.5, 0.5]), units.MilliMeters
-    manual_grid_settings.MaxStep = np.array([1.0,1.0,1.0]), units.MilliMeters
-    manual_grid_settings.Resolution = np.array([3.0,3.0,3.0]), units.MilliMeters
+    manual_grid_settings.MaxStep = np.array([1.0, 1.0, 1.0]), units.MilliMeters
+    manual_grid_settings.Resolution = np.array([3.0, 3.0, 3.0]), units.MilliMeters
 
     solver_settings = simulation.SolverSettings
-    solver_settings.PredefinedTolerances = solver_settings.PredefinedTolerances.enum.High
+    solver_settings.PredefinedTolerances = (
+        solver_settings.PredefinedTolerances.enum.High
+    )
     solver_settings.NumberOfProcesses = 1
     solver_settings.NumberOfThreads = 1
 
     auto_voxeler = next(
-        s for s in simulation.AllSettings
+        s
+        for s in simulation.AllSettings
         if isinstance(s, emlf.AutomaticVoxelerSettings)
     )
     simulation.Add(auto_voxeler, simulation_entities)
 
-    print(f"Updating Simulation Materials")
+    print("Updating Simulation Materials")
     simulation.UpdateAllMaterials()
 
     print("Updating Simulation Grid")
     simulation.UpdateGrid()
 
     document.AllSimulations.Add(simulation)
-
 
 
 def main():
@@ -302,7 +303,7 @@ def main():
 
         for site_name, site_configs in TMS_SITES.items():
             for site_config in site_configs:
-                electrode = site_config["s4l_electrode"]
+                electrode = site_config["s4l_centre"]
                 ydir_label = site_config["s4l_ydir"]
 
                 center_mm: Any = eeg_positions[electrode]
@@ -318,19 +319,19 @@ def main():
                 sim_label = f"{subject_id}_{site_name}"
                 if len(site_configs) > 1:
                     sim_label += f"_{electrode}"
-                
+
                 coil_group = model.CreateGroup(f"Coil_{sim_label}")
                 wing1_group = model.CreateGroup("Wing1")
                 wing2_group = model.CreateGroup("Wing2")
                 coil_group.Add(wing1_group)
                 coil_group.Add(wing2_group)
                 for i, turn in enumerate(wing1_turns):
-                    turn.Name = f"Wing1_Turn{i+1:02d}"
+                    turn.Name = f"Wing1_Turn{i + 1:02d}"
                     wing1_group.Add(turn)
                 for i, turn in enumerate(wing2_turns):
-                    turn.Name = f"Wing2_Turn{i+1:02d}"
+                    turn.Name = f"Wing2_Turn{i + 1:02d}"
                     wing2_group.Add(turn)
-                
+
                 setup_simulation(sim_label, wing1_turns, wing2_turns)
 
                 document.SaveDocument()
